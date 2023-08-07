@@ -1,0 +1,93 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/AyushAgarwal0109/java-code.git'
+            }
+        }
+
+        stage('Unit Testing') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+
+        stage('Integration Testing') {
+            steps {
+                sh 'mvn verify -DskipUnitTests'
+            }
+        }
+
+        stage('Maven Build') {
+            steps {
+                sh 'mvn clean install'
+            }
+        }
+
+        stage('Static Code Analysis') {
+            steps {
+                script {
+                    withSonarQubeEnv(credentialsId: 'sonarqubetoken') {
+                        sh 'mvn clean package sonar:sonar'
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate Status') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonarqubetoken'
+                }
+            }
+        }
+
+        stage('Upload Artifacts to Nexus'){
+            
+            steps{
+                script{
+                    nexusArtifactUploader artifacts: 
+                [
+                    [
+                    artifactId: 'springboot',
+                    classifier: '', 
+                    file: 'target/Thapar.jar', 
+                    type: 'jar'
+                    ]
+                ], 
+                    credentialsId: 'nexuscreds', 
+                    groupId: 'com.example', 
+                    nexusUrl: '54.165.129.97:8081', 
+                    nexusVersion: 'nexus3', 
+                    protocol: 'http', 
+                    repository: 'java-release', 
+                    version: '1.0.0'
+                }
+            }
+        }
+
+        stage("Docker Image Build"){
+            steps {
+                script {
+                    sh 'docker image build -t $JOB_NAME:v1.$BUILD_ID .'
+                    sh 'docker image tag $JOB_NAME:v1.$BUILD_ID ayush0109/$JOB_NAME:v1.$BUILD_ID'
+                    sh 'docker image tag $JOB_NAME:v1.$BUILD_ID ayush0109/$JOB_NAME:latest'
+                }
+            }
+        }
+
+        stage("Push Docker Image to DockerHub"){
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'dockerhub_password', variable: 'dockerhub_creds')]) {
+                        sh 'docker login -u ayush0109 -p ${dockerhub_creds}'
+                        sh 'docker image push ayush0109/$JOB_NAME:v1.$BUILD_ID'
+                        sh 'docker image push ayush0109/$JOB_NAME:latest'
+                    }
+                }
+            }
+        }
+    }
+}
